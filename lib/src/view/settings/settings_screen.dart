@@ -13,6 +13,7 @@ import 'package:lichess_mobile/src/utils/l10n.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
 import 'package:lichess_mobile/src/utils/navigation.dart';
 import 'package:lichess_mobile/src/view/home/home_tab_screen.dart';
+import 'package:lichess_mobile/src/view/home/quick_matches_sheet.dart';
 import 'package:lichess_mobile/src/view/settings/account_preferences_screen.dart';
 import 'package:lichess_mobile/src/view/settings/app_log_settings_screen.dart';
 import 'package:lichess_mobile/src/view/settings/board_settings_screen.dart';
@@ -100,6 +101,14 @@ class const SettingsScreen({super.key}) extends ConsumerWidget {
                     rootNavigator: true,
                   ).push(HomeTabScreen.buildRoute(editModeEnabled: true));
                 },
+              ),
+              ListTile(
+                leading: const Icon(Icons.bolt_outlined),
+                title: const Text('Quick matches'),
+                trailing: Theme.of(context).platform == TargetPlatform.iOS
+                    ? const CupertinoListTileChevron()
+                    : null,
+                onTap: () => showQuickMatchesSheet(context),
               ),
               ListTile(
                 leading: const Icon(Symbols.chess_pawn),

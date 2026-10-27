@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:dartchess/dartchess.dart';
@@ -12,8 +11,10 @@ import 'package:lichess_mobile/src/model/game/game_status.dart';
 import 'package:lichess_mobile/src/model/game/over_the_board_game.dart';
 import 'package:lichess_mobile/src/model/game/playable_game.dart';
 import 'package:lichess_mobile/src/model/tournament/tournament_controller.dart';
+import 'package:lichess_mobile/src/tab_navigation.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
 import 'package:lichess_mobile/src/view/game/status_l10n.dart';
+import 'package:lichess_mobile/src/view/settings/settings_screen.dart';
 import 'package:lichess_mobile/src/widgets/feedback.dart';
 import 'package:lichess_mobile/src/widgets/glass_modal.dart';
 import 'package:material_ui/material_ui.dart';
@@ -38,32 +39,69 @@ class const GameResultDialog({
   ConsumerState<GameResultDialog> createState() => _GameResultDialogState();
 }
 
-class _GameResultDialogState() extends ConsumerState<GameResultDialog> {
-  late Timer _buttonActivationTimer;
-  bool _activateButtons = false;
+class _GameResultDialogState()
+    extends ConsumerState<GameResultDialog>
+    with SingleTickerProviderStateMixin {
+  /// How long the actions take to fade in. They accept taps once this completes, which is the
+  /// misclick guard the dialog had before, folded into the animation so there is no dead beat.
+  static const _entranceDuration = Duration(milliseconds: 350);
+
+  late final AnimationController _entrance;
+  bool _motionChecked = false;
 
   @override
   void initState() {
-    _buttonActivationTimer = Timer(const Duration(milliseconds: 1000), () {
-      if (mounted) {
-        setState(() {
-          _activateButtons = true;
-        });
-      }
-    });
     super.initState();
+    _entrance = AnimationController(vsync: this, duration: _entranceDuration);
+    // Start after the first frame: a slow first frame could otherwise run the whole entrance
+    // before it was ever painted, so the actions appeared fully and then animated.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _entrance.forward();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_motionChecked) return;
+    _motionChecked = true;
+    // Respect the platform's reduce-motion setting: appear armed immediately.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _entrance.value = 1.0;
+    }
   }
 
   @override
   void dispose() {
-    _buttonActivationTimer.cancel();
+    _entrance.dispose();
     super.dispose();
+  }
+
+  /// Closes the dialog (and anything else popup-shaped above the game screen).
+  void _closePopups() {
+    Navigator.of(context).popUntil((route) => route is! PopupRoute);
+  }
+
+  /// Leaves the game and opens the app settings.
+  void _openSettings() {
+    final navigator = Navigator.of(context);
+    _closePopups();
+    navigator.push(SettingsScreen.buildRoute());
+  }
+
+  /// Leaves the game and returns to the home tab.
+  void _backToHome() {
+    final tabNotifier = ref.read(currentBottomTabProvider.notifier);
+    final homeNavigator = homeNavigatorKey.currentState;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    tabNotifier.state = BottomTab.home;
+    homeNavigator?.popUntil((route) => route.isFirst);
   }
 
   /// The rematch button action, or null to disable it. A socket offer if the
   /// opponent is online, otherwise a challenge for offline clockless games.
   VoidCallback? _rematchAction(BuildContext context, GameState value) {
-    if (!_activateButtons || value.game.opponent?.offeringRematch == true) {
+    if (value.game.opponent?.offeringRematch == true) {
       return null;
     }
     final ctrlProvider = gameControllerProvider(widget.id);
@@ -108,138 +146,166 @@ class _GameResultDialogState() extends ConsumerState<GameResultDialog> {
               padding: const EdgeInsets.only(bottom: 16.0),
               child: GameResult(game: value.game),
             ),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 400),
-              firstCurve: Curves.easeOutExpo,
-              secondCurve: Curves.easeInExpo,
-              sizeCurve: Curves.easeInOut,
-              firstChild: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  if (value.game.me?.offeringRematch == true ||
-                      value.correspondenceRematchId != null) ...[
-                    Flexible(
-                      flex: 3,
-                      child: Text(
-                        maxLines: 2,
-                        context.l10n.rematchOfferSent,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton.outlined(
-                      onPressed: () async {
-                        if (value.game.me?.offeringRematch == true) {
-                          ref.read(ctrlProvider.notifier).declineRematch();
-                        } else {
-                          try {
-                            await ref.read(ctrlProvider.notifier).cancelRematchChallenge();
-                          } catch (_) {
-                            if (context.mounted) {
-                              showSnackBar(
-                                context,
-                                'Could not cancel the rematch challenge',
-                                type: SnackBarType.error,
-                              );
-                            }
-                          }
-                        }
-                      },
-                      tooltip: context.l10n.cancelRematchOffer,
-                      icon: const Icon(Icons.cancel),
-                    ),
-                  ] else if (value.canOfferRematch)
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _rematchAction(context, value),
-                        child: Text(context.l10n.rematch),
-                      ),
-                    )
-                  else
-                    const SizedBox.shrink(),
-                ],
+            AnimatedBuilder(
+              animation: _entrance,
+              builder: (context, child) => Opacity(
+                key: const ValueKey('game-result-actions'),
+                opacity: 0.55 + 0.45 * _entrance.value,
+                child: Transform.translate(
+                  offset: Offset(0.0, 6.0 * (1 - _entrance.value)),
+                  child: child,
+                ),
               ),
-              secondChild: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 15.0),
-                    child: Text(
-                      context.l10n.yourOpponentWantsToPlayANewGameWithYou,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 15.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        IconButton.filled(
-                          icon: const Icon(Icons.check),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: ColorScheme.of(context).onPrimary,
-                            backgroundColor: ColorScheme.of(context).primary,
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                alignment: Alignment.topCenter,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AnimatedCrossFade(
+                      duration: const Duration(milliseconds: 400),
+                      firstCurve: Curves.easeOutExpo,
+                      secondCurve: Curves.easeInExpo,
+                      sizeCurve: Curves.easeInOut,
+                      firstChild: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          if (value.game.me?.offeringRematch == true ||
+                              value.correspondenceRematchId != null) ...[
+                            Flexible(
+                              flex: 3,
+                              child: Text(
+                                maxLines: 2,
+                                context.l10n.rematchOfferSent,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton.outlined(
+                              onPressed: () async {
+                                if (value.game.me?.offeringRematch == true) {
+                                  ref.read(ctrlProvider.notifier).declineRematch();
+                                } else {
+                                  try {
+                                    await ref.read(ctrlProvider.notifier).cancelRematchChallenge();
+                                  } catch (_) {
+                                    if (context.mounted) {
+                                      showSnackBar(
+                                        context,
+                                        'Could not cancel the rematch challenge',
+                                        type: SnackBarType.error,
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                              tooltip: context.l10n.cancelRematchOffer,
+                              icon: const Icon(Icons.cancel),
+                            ),
+                          ] else if (value.canOfferRematch)
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: _rematchAction(context, value),
+                                child: Text(context.l10n.rematch),
+                              ),
+                            )
+                          else
+                            const SizedBox.shrink(),
+                        ],
+                      ),
+                      secondChild: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 15.0),
+                            child: Text(
+                              context.l10n.yourOpponentWantsToPlayANewGameWithYou,
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          tooltip: context.l10n.accept,
-                          onPressed: () {
-                            ref.read(ctrlProvider.notifier).proposeOrAcceptRematch();
-                          },
-                        ),
-                        IconButton.filled(
-                          icon: const Icon(Icons.close),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: ColorScheme.of(context).onError,
-                            backgroundColor: ColorScheme.of(context).error,
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 15.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                IconButton.filled(
+                                  icon: const Icon(Icons.check),
+                                  style: FilledButton.styleFrom(
+                                    foregroundColor: ColorScheme.of(context).onPrimary,
+                                    backgroundColor: ColorScheme.of(context).primary,
+                                  ),
+                                  tooltip: context.l10n.accept,
+                                  onPressed: () {
+                                    ref.read(ctrlProvider.notifier).proposeOrAcceptRematch();
+                                  },
+                                ),
+                                IconButton.filled(
+                                  icon: const Icon(Icons.close),
+                                  style: FilledButton.styleFrom(
+                                    foregroundColor: ColorScheme.of(context).onError,
+                                    backgroundColor: ColorScheme.of(context).error,
+                                  ),
+                                  tooltip: context.l10n.decline,
+                                  onPressed: () {
+                                    ref.read(ctrlProvider.notifier).declineRematch();
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
-                          tooltip: context.l10n.decline,
-                          onPressed: () {
-                            ref.read(ctrlProvider.notifier).declineRematch();
-                          },
-                        ),
-                      ],
+                        ],
+                      ),
+                      crossFadeState: value.game.opponent?.offeringRematch ?? false
+                          ? CrossFadeState.showSecond
+                          : CrossFadeState.showFirst,
                     ),
-                  ),
-                ],
+                    if (value.canGetNewOpponent)
+                      FilledButton.tonal(
+                        onPressed: () {
+                          Navigator.of(context).popUntil((route) => route is! PopupRoute);
+                          widget.onNewOpponentCallback(value.game);
+                        },
+                        child: Text(context.l10n.newOpponent, textAlign: TextAlign.center),
+                      ),
+                    if (value.tournament?.isOngoing == true) ...[
+                      FilledButton.icon(
+                        icon: const Icon(Icons.play_arrow),
+                        onPressed: () => _backToTournament(value.tournament!.id),
+                        label: Text(context.l10n.backToTournament, textAlign: TextAlign.center),
+                      ),
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.pause),
+                        onPressed: () {
+                          // Pause the tournament
+                          ref
+                              .read(tournamentControllerProvider(value.tournament!.id).notifier)
+                              .joinOrPause();
+                          _backToTournament(value.tournament!.id);
+                        },
+                        label: Text(context.l10n.pause, textAlign: TextAlign.center),
+                      ),
+                    ],
+                    if (value.game.userAnalysable)
+                      FilledButton.tonal(
+                        onPressed: () {
+                          Navigator.of(context).popUntil((route) => route is! PopupRoute);
+                          widget.onAnalysisCallback(value.analysisOptions);
+                        },
+                        child: Text(context.l10n.analysis, textAlign: TextAlign.center),
+                      ),
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.settings_outlined, size: 18.0),
+                      onPressed: _openSettings,
+                      label: const Text('Settings', textAlign: TextAlign.center),
+                    ),
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.home_outlined, size: 18.0),
+                      onPressed: _backToHome,
+                      label: const Text('Back to home', textAlign: TextAlign.center),
+                    ),
+                  ],
+                ),
               ),
-              crossFadeState: value.game.opponent?.offeringRematch ?? false
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
             ),
-            if (value.canGetNewOpponent)
-              FilledButton.tonal(
-                onPressed: _activateButtons
-                    ? () {
-                        Navigator.of(context).popUntil((route) => route is! PopupRoute);
-                        widget.onNewOpponentCallback(value.game);
-                      }
-                    : null,
-                child: Text(context.l10n.newOpponent, textAlign: TextAlign.center),
-              ),
-            if (value.tournament?.isOngoing == true) ...[
-              FilledButton.icon(
-                icon: const Icon(Icons.play_arrow),
-                onPressed: () => _backToTournament(value.tournament!.id),
-                label: Text(context.l10n.backToTournament, textAlign: TextAlign.center),
-              ),
-              FilledButton.tonalIcon(
-                icon: const Icon(Icons.pause),
-                onPressed: () {
-                  // Pause the tournament
-                  ref
-                      .read(tournamentControllerProvider(value.tournament!.id).notifier)
-                      .joinOrPause();
-                  _backToTournament(value.tournament!.id);
-                },
-                label: Text(context.l10n.pause, textAlign: TextAlign.center),
-              ),
-            ],
-            if (value.game.userAnalysable)
-              FilledButton.tonal(
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route is! PopupRoute);
-                  widget.onAnalysisCallback(value.analysisOptions);
-                },
-                child: Text(context.l10n.analysis, textAlign: TextAlign.center),
-              ),
           ],
         ),
       ),

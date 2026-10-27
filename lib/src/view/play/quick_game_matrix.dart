@@ -7,6 +7,7 @@ import 'package:lichess_mobile/src/model/auth/auth_controller.dart';
 import 'package:lichess_mobile/src/model/common/speed.dart';
 import 'package:lichess_mobile/src/model/common/time_increment.dart';
 import 'package:lichess_mobile/src/model/lobby/game_seek.dart';
+import 'package:lichess_mobile/src/model/settings/quick_match_preferences.dart';
 import 'package:lichess_mobile/src/network/connectivity.dart';
 import 'package:lichess_mobile/src/styles/styles.dart';
 import 'package:lichess_mobile/src/tab_navigation.dart';
@@ -110,6 +111,9 @@ class const _SectionChoices({
                 speed: choice.speed,
                 onTap: connectionStatus == LichessConnectionStatus.online
                     ? () {
+                        // Feed the home screen quick matches: what you start here is what you
+                        // tend to play.
+                        ref.read(quickMatchPreferencesProvider.notifier).recordPlayed(choice);
                         Navigator.of(context).pushHidingTabBar(
                           GameScreen.buildRoute(
                             source: LobbySource(GameSeek.fastPairing(choice, authUser)),

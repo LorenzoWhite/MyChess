@@ -52,6 +52,14 @@ typedef LoadingParam = ({Variant variant, String? fen, Move? lastMove, Side? ori
 /// Delay before the game end dialog is shown after a (non-bullet) game finishes.
 const kGameEndDialogDelay = Duration(milliseconds: 400);
 
+/// Game ids whose end-of-game dialog has already been shown.
+///
+/// [gameControllerProvider] is auto-disposed, and when a game ends the screen rebuilds into its
+/// finished layout. That can drop the listener for a moment, recreate the controller and re-fire
+/// the listener with no previous state, which pushed a second dialog over the first: the actions
+/// looked available, then dimmed and animated again.
+final _shownGameEndDialogsProvider = Provider<Set<GameFullId>>((ref) => <GameFullId>{});
+
 /// Game body for the [GameScreen].
 ///
 /// This widget is responsible for displaying the board, the clocks, the players,
@@ -173,8 +181,10 @@ class const GameBody({
       // If the game is no longer playable, show the game end dialog.
       // We want to show it only once, whether the game is already finished on
       // first load or not.
+      final shownDialogs = ref.read(_shownGameEndDialogsProvider);
       if ((prev?.hasValue != true || prev!.requireValue.game.playable == true) &&
-          game.playable == false) {
+          game.playable == false &&
+          shownDialogs.add(gameId)) {
         Timer(
           // already finished or bullet: show the dialog immediately
           (prev?.hasValue != true && game.playable == false) ||

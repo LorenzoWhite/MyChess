@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:lichess_mobile/src/model/common/chess.dart';
 import 'package:lichess_mobile/src/model/common/preloaded_data.dart';
 import 'package:lichess_mobile/src/model/settings/board_preferences.dart';
+import 'package:lichess_mobile/src/model/settings/bundled_backgrounds.dart';
 import 'package:lichess_mobile/src/model/settings/general_preferences.dart';
 import 'package:lichess_mobile/src/styles/styles.dart';
 import 'package:lichess_mobile/src/utils/image.dart';
@@ -49,6 +50,7 @@ class const _Body() extends ConsumerWidget {
         .requireValue
         .appDocumentsDirectory;
     final boardPrefs = ref.watch(boardPreferencesProvider);
+    final generalPrefs = ref.watch(generalPreferencesProvider);
 
     final viewport = MediaQuery.sizeOf(context);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
@@ -137,6 +139,39 @@ class const _Body() extends ConsumerWidget {
             child: Text(context.l10n.mobileSettingsPickAnImageHelp),
           ),
         ],
+        if (kBundledBackgrounds.isNotEmpty)
+          ListSection(
+            header: const SettingsSectionTitle('Bundled images'),
+            backgroundColor: ColorScheme.of(context).surfaceContainerLowest,
+            children: [
+              for (final bundled in kBundledBackgrounds)
+                ListTile(
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(6.0),
+                    child: Image.asset(
+                      bundled.assetPath,
+                      width: 48.0,
+                      height: 48.0,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  title: Text(bundled.label),
+                  trailing:
+                      generalPrefs.backgroundImage?.isBundled == true &&
+                          generalPrefs.backgroundImage?.path == bundled.assetPath
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () {
+                    ref
+                        .read(generalPreferencesProvider.notifier)
+                        .setBackground(
+                          backgroundImage: bundled.toBackgroundImage(viewport: viewport),
+                        );
+                    Navigator.pop(context);
+                  },
+                ),
+            ],
+          ),
         ListSection(
           header: SettingsSectionTitle(context.l10n.mobileSettingsCustomBackgroundPresets),
           backgroundColor: ColorScheme.of(context).surfaceContainerLowest,

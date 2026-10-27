@@ -178,6 +178,8 @@ enum BackgroundColor(final Color color, final String _label) {
 sealed class const BackgroundImage._() with _$BackgroundImage {
   const factory({
     /// The path to the image asset relative to the document directory returned by [getApplicationDocumentsDirectory]
+    ///
+    /// When [isBundled] is true, this is instead the path of an asset in the app bundle.
     required String path,
     required Matrix4 transform,
     required bool isBlurred,
@@ -187,6 +189,10 @@ sealed class const BackgroundImage._() with _$BackgroundImage {
     required double height,
     required double viewportWidth,
     required double viewportHeight,
+
+    /// Whether [path] is an asset bundled with the app rather than a file in the documents
+    /// directory.
+    @Default(false) bool isBundled,
   }) = _BackgroundImage;
 
   static Color getFilterColor(Color surfaceColor, double meanLuminance) => surfaceColor.withValues(
@@ -228,6 +234,8 @@ class const BackgroundImageConverter()
       height: json['height'] as double,
       viewportWidth: json['viewportWidth'] as double,
       viewportHeight: json['viewportHeight'] as double,
+      // Absent for preferences written before bundled backgrounds existed.
+      isBundled: json['isBundled'] as bool? ?? false,
     );
   }
 
@@ -247,6 +255,7 @@ class const BackgroundImageConverter()
       'height': object.height,
       'viewportWidth': object.viewportWidth,
       'viewportHeight': object.viewportHeight,
+      'isBundled': object.isBundled,
     };
   }
 }

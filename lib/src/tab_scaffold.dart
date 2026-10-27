@@ -2,7 +2,7 @@ import 'package:cupertino_ui/cupertino_ui.dart' show CupertinoColors;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/tab_navigation.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
-import 'package:lichess_mobile/src/view/home/home_tab_screen.dart';
+import 'package:lichess_mobile/src/view/home/cross_menu_screen.dart';
 import 'package:lichess_mobile/src/view/learn/learn_tab_screen.dart';
 import 'package:lichess_mobile/src/view/more/more_tab_screen.dart';
 import 'package:lichess_mobile/src/view/puzzle/puzzle_tab_screen.dart';
@@ -48,7 +48,8 @@ class const MainTabScaffold({super.key}) extends ConsumerWidget {
           builder: (context) => ColoredBox(
             color: Theme.of(context).scaffoldBackgroundColor,
             child: _TabBarLayout(
-              height: tabBarHeight,
+              // The home screen is full-bleed: its bar is hidden, so no space is reserved.
+              height: currentTab == BottomTab.home ? 0 : tabBarHeight,
               extendBody: false,
               child: Stack(
                 children: [
@@ -62,7 +63,14 @@ class const MainTabScaffold({super.key}) extends ConsumerWidget {
                     child: MediaQuery.removePadding(
                       context: context,
                       removeTop: true,
-                      child: _TabBarTransition(visibility: tabBarVisibility, child: navigationBar),
+                      child: _HomeTabBarFade(
+                        // The home screen is a full-bleed menu: the bar would cut into it.
+                        hidden: currentTab == BottomTab.home,
+                        child: _TabBarTransition(
+                          visibility: tabBarVisibility,
+                          child: navigationBar,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -128,10 +136,13 @@ class const MainTabScaffold({super.key}) extends ConsumerWidget {
           enableBackgroundSampling: false,
           // Each tab screen resizes for the keyboard in its own Scaffold.
           resizeToAvoidBottomInset: false,
-          bottomBar: _PreferredTabBarTransition(
-            visibility: tabBarVisibility,
-            tabBar: tabBar,
-            builder: glass ? buildGlassTabBar : null,
+          bottomBar: _HomeTabBarFadePreferred(
+            hidden: currentTab == BottomTab.home,
+            child: _PreferredTabBarTransition(
+              visibility: tabBarVisibility,
+              tabBar: tabBar,
+              builder: glass ? buildGlassTabBar : null,
+            ),
           ),
           // The floating tab bar has no edge effect around it, like in iOS apps.
           bottomEdgeFade: false,
@@ -139,7 +150,7 @@ class const MainTabScaffold({super.key}) extends ConsumerWidget {
           // as their bottom padding ([TabRoutePage]), and the tab screens' [PlatformScaffold]
           // extend their body into it.
           body: _TabBarLayout(
-            height: tabBar.preferredSize.height,
+            height: currentTab == BottomTab.home ? 0 : tabBar.preferredSize.height,
             extendBody: true,
             // GlassScaffold installs a CupertinoTheme that sets the icon color to its primary
             // color: restore the app icon theme.
@@ -195,7 +206,7 @@ class const MainTabScaffold({super.key}) extends ConsumerWidget {
         return _MaterialTabView(
           navigatorKey: homeNavigatorKey,
           tab: BottomTab.home,
-          builder: (context) => const HomeTabScreen(),
+          builder: (context) => const CrossMenuScreen(),
         );
       case 1:
         return _MaterialTabView(
@@ -637,4 +648,39 @@ class const _BlurredTabBar({
       ),
     );
   }
+}
+
+/// Fades the bottom navigation bar out while the home tab is showing.
+///
+/// The bar keeps its reserved space, so switching tabs does not shift the layout of the other
+/// tabs. While hidden it does not receive taps or semantics.
+class const _HomeTabBarFade({required final bool hidden, required final Widget child})
+    extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: hidden,
+      child: ExcludeSemantics(
+        excluding: hidden,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          opacity: hidden ? 0.0 : 1.0,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// A [_HomeTabBarFade] for a bottom bar that has to report a preferred size.
+class const _HomeTabBarFadePreferred({
+  required final bool hidden,
+  required final PreferredSizeWidget child,
+}) extends StatelessWidget implements PreferredSizeWidget {
+  @override
+  Size get preferredSize => hidden ? Size.zero : child.preferredSize;
+
+  @override
+  Widget build(BuildContext context) => _HomeTabBarFade(hidden: hidden, child: child);
 }

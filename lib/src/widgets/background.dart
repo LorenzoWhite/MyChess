@@ -32,9 +32,12 @@ class const FullScreenBackground({
         .requireValue
         .appDocumentsDirectory;
 
-    if (generalPrefs.backgroundImage != null && appDocumentsDirectory != null) {
+    final backgroundImage = generalPrefs.backgroundImage;
+
+    // Bundled images do not need the documents directory, only picked ones do.
+    if (backgroundImage != null && (backgroundImage.isBundled || appDocumentsDirectory != null)) {
       return FullScreenBackgroundImage(
-        backgroundImage: generalPrefs.backgroundImage!,
+        backgroundImage: backgroundImage,
         viewport: MediaQuery.sizeOf(context),
         appDocumentsDirectory: appDocumentsDirectory,
         child: child,
@@ -57,7 +60,9 @@ class const FullScreenBackground({
 class const FullScreenBackgroundImage({
   required final BackgroundImage backgroundImage,
   required final Size viewport,
-  required final Directory appDocumentsDirectory,
+
+  /// Only needed for picked images; bundled ones are read from the app bundle.
+  required final Directory? appDocumentsDirectory,
   required final Widget child,
 }) extends StatefulWidget {
   static Size imageFitSize(BoxFit boxFit, Size imageSize, Size viewportSize) => switch (boxFit) {
@@ -136,6 +141,10 @@ class _FullScreenBackgroundImageState() extends State<FullScreenBackgroundImage>
       widget.backgroundImage.meanLuminance,
     );
 
+    final ImageProvider imageProvider = widget.backgroundImage.isBundled
+        ? AssetImage(widget.backgroundImage.path)
+        : FileImage(File('${widget.appDocumentsDirectory!.path}/${widget.backgroundImage.path}'));
+
     return Stack(
       children: [
         InteractiveViewer(
@@ -157,9 +166,7 @@ class _FullScreenBackgroundImageState() extends State<FullScreenBackgroundImage>
             decoration: BoxDecoration(
               color: widget.backgroundImage.seedColor,
               image: DecorationImage(
-                image: FileImage(
-                  File('${widget.appDocumentsDirectory.path}/${widget.backgroundImage.path}'),
-                ),
+                image: imageProvider,
                 fit: boxFit,
                 colorFilter: ColorFilter.mode(filterColor, BlendMode.srcOver),
               ),

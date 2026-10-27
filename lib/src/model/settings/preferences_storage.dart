@@ -28,6 +28,7 @@ enum PrefCategory(final String storageKey) {
   openingExplorer('preferences.opening_explorer'),
   gameHistory('preferences.gameHistory'),
   puzzle('preferences.puzzle'),
+  quickMatch('preferences.quickMatch'),
   broadcast('preferences.broadcast'),
   engineEvaluation('preferences.engineEvaluation'),
   offlineComputerGame('preferences.offlineComputerGame'),
