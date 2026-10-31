@@ -43,6 +43,8 @@ class const AnalysisTreeView(final AnalysisOptions options) extends ConsumerWidg
                   shouldShowAnnotations: enableServerAnalysis && prefs.showAnnotations,
                   premovePaths: analysisState.forecast?.lines,
                   displayMode: prefs.inlineNotation ? .inlineNotation : .twoColumn,
+                  // Show the game report's annotations once it has run.
+                  reportContextId: options.contextId,
                 ),
                 if (analysisState.archivedGame != null)
                   Padding(

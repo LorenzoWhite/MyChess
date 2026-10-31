@@ -34,6 +34,16 @@ class const Clock({
 
   /// Padding around the clock.
   final EdgeInsets padding = const EdgeInsets.symmetric(vertical: 3.0, horizontal: 5.0),
+
+  /// Corner radius of the clock's background.
+  final BorderRadius borderRadius = const BorderRadius.all(Radius.circular(5.0)),
+
+  /// Scales the digits only: the padding still sets the box size, so the numbers can breathe.
+  final double fontScale = 1.0,
+
+  /// Narrowest the clock gets, with its time centred: keeps it from changing width when the time
+  /// gains or loses a digit.
+  final double? minWidth,
   super.key,
 }) extends StatelessWidget {
   @override
@@ -63,8 +73,9 @@ class const Clock({
         // TODO improve this
         final fontScaleFactor = maxWidth < 90 ? 0.8 : 1.0;
         return Container(
+          constraints: minWidth != null ? BoxConstraints(minWidth: minWidth!) : null,
           decoration: BoxDecoration(
-            borderRadius: const BorderRadius.all(Radius.circular(5.0)),
+            borderRadius: borderRadius,
             color: timeLeft > Duration.zero
                 ? active
                       ? isEmergency
@@ -78,6 +89,7 @@ class const Clock({
             child: MediaQuery.withClampedTextScaling(
               maxScaleFactor: kMaxClockTextScaleFactor,
               child: Text.rich(
+                textAlign: TextAlign.center,
                 TextSpan(
                   text: hours > 0
                       ? '$hoursDisplay:${mins.toString().padLeft(2, '0')}:$secs'
@@ -90,7 +102,7 @@ class const Clock({
                                     : effectiveClockStyle.activeTextColor
                               : effectiveClockStyle.textColor
                         : effectiveClockStyle.emergencyTextColor,
-                    fontSize: _kClockFontSize * fontScaleFactor,
+                    fontSize: _kClockFontSize * fontScaleFactor * fontScale,
                     height: isShortVerticalScreen(context) ? 1.0 : null,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
@@ -98,12 +110,16 @@ class const Clock({
                     if (showTenths)
                       TextSpan(
                         text: '.${timeLeft.inMilliseconds.remainder(1000) ~/ 100}',
-                        style: TextStyle(fontSize: _kClockTenthFontSize * fontScaleFactor),
+                        style: TextStyle(
+                          fontSize: _kClockTenthFontSize * fontScaleFactor * fontScale,
+                        ),
                       ),
                     if (!active && timeLeft < const Duration(seconds: 1))
                       TextSpan(
                         text: '${timeLeft.inMilliseconds.remainder(1000) ~/ 10 % 10}',
-                        style: TextStyle(fontSize: _kClockHundredsFontSize * fontScaleFactor),
+                        style: TextStyle(
+                          fontSize: _kClockHundredsFontSize * fontScaleFactor * fontScale,
+                        ),
                       ),
                   ],
                 ),

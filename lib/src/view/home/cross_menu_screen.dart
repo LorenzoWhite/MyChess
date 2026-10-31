@@ -17,6 +17,7 @@ import 'package:lichess_mobile/src/view/home/quick_matches_sheet.dart';
 import 'package:lichess_mobile/src/view/home/rook_piece.dart';
 import 'package:lichess_mobile/src/view/play/play_bottom_sheet.dart';
 import 'package:lichess_mobile/src/widgets/adaptive_bottom_sheet.dart';
+import 'package:lichess_mobile/src/widgets/glass.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// Distance the pointer must travel before the drag is locked to an axis.
@@ -717,7 +718,7 @@ class const _CenterPane() extends StatelessWidget {
                 ColoredBox(color: Colors.black.withValues(alpha: 0.38)),
                 const Positioned.fill(
                   child: CustomPaint(
-                    painter: _GlassBorderPainter(
+                    painter: GlassBorderPainter(
                       radius: _kTileRadius,
                       highlight: Colors.white,
                       opacity: 0.5,
@@ -833,7 +834,7 @@ class const _ArmTile({
                     ),
                     Positioned.fill(
                       child: CustomPaint(
-                        painter: _GlassBorderPainter(
+                        painter: GlassBorderPainter(
                           radius: _kTileRadius,
                           highlight: isActive ? colorScheme.primary : Colors.white,
                           opacity: isActive ? 1.0 : 0.6,
@@ -944,7 +945,7 @@ class const _QuickMatchTile({
                     ),
                     Positioned.fill(
                       child: CustomPaint(
-                        painter: _GlassBorderPainter(
+                        painter: GlassBorderPainter(
                           radius: _kTileRadius,
                           highlight: isActive ? colorScheme.primary : Colors.white,
                           opacity: isActive ? 1.0 : 0.5,
@@ -960,37 +961,6 @@ class const _QuickMatchTile({
       ),
     );
   }
-}
-
-/// A 1 px border that is brighter along the top edge, like light catching a glass edge.
-class const _GlassBorderPainter({
-  required final double radius,
-  required final Color highlight,
-  required final double opacity,
-}) extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(radius));
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          highlight.withValues(alpha: 0.55 * opacity),
-          highlight.withValues(alpha: 0.08 * opacity),
-        ],
-      ).createShader(rect);
-    canvas.drawRRect(rrect, paint);
-  }
-
-  @override
-  bool shouldRepaint(_GlassBorderPainter oldDelegate) =>
-      oldDelegate.radius != radius ||
-      oldDelegate.highlight != highlight ||
-      oldDelegate.opacity != opacity;
 }
 
 /// Short, upper-case speed name for the quick match tiles.

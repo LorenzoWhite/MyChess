@@ -30,6 +30,10 @@ class const BoardWidget({
   /// Move annotations to display on the board.
   final Map<Square, Annotation> annotations = const {},
   final Widget? boardOverlay,
+
+  /// Widget drawn over the board's squares (inside any border), sized to cover them exactly, with
+  /// the board's brightness filter. It never receives pointer events.
+  final Widget? boardForeground,
   final String? error,
   final GlobalKey? boardKey,
 }) extends StatelessWidget {
@@ -69,20 +73,32 @@ class const BoardWidget({
 
     final overlay = boardOverlay ?? (error != null ? _ErrorWidget(errorMessage: error!) : null);
 
-    if (overlay != null) {
+    if (overlay != null || boardForeground != null) {
       return Stack(
         clipBehavior: Clip.none,
         children: [
           board,
-          Positioned(
-            left: 16.0,
-            right: 16.0,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: OverflowBox(maxHeight: double.infinity, child: overlay),
+          if (boardForeground != null)
+            Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.all(settings.border?.width ?? 0.0),
+                // Same filter as chessground puts on its pieces, so the two look identical.
+                child: BrightnessHueFilter(
+                  brightness: settings.brightness,
+                  child: IgnorePointer(child: boardForeground),
+                ),
+              ),
             ),
-          ),
+          if (overlay != null)
+            Positioned(
+              left: 16.0,
+              right: 16.0,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: OverflowBox(maxHeight: double.infinity, child: overlay),
+              ),
+            ),
         ],
       );
     }

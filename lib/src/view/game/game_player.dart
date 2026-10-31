@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:dartchess/dartchess.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:lichess_mobile/src/constants.dart';
+import 'package:lichess_mobile/src/model/account/account_pref_types.dart';
 import 'package:lichess_mobile/src/model/account/account_repository.dart';
 import 'package:lichess_mobile/src/model/game/game.dart';
 import 'package:lichess_mobile/src/model/game/material_diff.dart';
@@ -14,18 +14,33 @@ import 'package:lichess_mobile/src/styles/lichess_colors.dart';
 import 'package:lichess_mobile/src/styles/lichess_icons.dart';
 import 'package:lichess_mobile/src/styles/styles.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
-import 'package:lichess_mobile/src/utils/lichess_assets.dart';
 import 'package:lichess_mobile/src/utils/screen.dart';
 import 'package:lichess_mobile/src/view/account/rating_pref_aware.dart';
 import 'package:lichess_mobile/src/view/user/user_or_profile_screen.dart';
 import 'package:lichess_mobile/src/widgets/buttons.dart';
 import 'package:lichess_mobile/src/widgets/clock.dart';
+import 'package:lichess_mobile/src/widgets/glass.dart';
 import 'package:lichess_mobile/src/widgets/material_diff.dart';
-import 'package:lichess_mobile/src/widgets/network_image.dart';
 import 'package:lichess_mobile/src/widgets/user.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// A widget to display player information above/below the chess board.
+/// Height of a player bar.
+const _kPillHeight = 44.0;
+
+/// Height of the [GamePlayer.prominent] bar: the player holding the phone.
+const _kProminentPillHeight = 48.0;
+
+/// Space between the edge of a player bar and its avatar and clock.
+const _kPillInset = 4.0;
+
+/// Narrowest width of a player bar, as a fraction of the room it has. Bars grow with their content
+/// up to the full width. The prominent bar is wider, so the player's own bar stands out.
+const _kPillMinWidthFactor = 0.62;
+const _kProminentPillMinWidthFactor = 0.7;
+
+/// A widget to display player information above/below the chess board: a frosted glass pill with
+/// the player's avatar, their name, a second line with their rating and captured pieces, and their
+/// clock.
 class const GamePlayer({
   required final BaseGame game,
   required final Side side,
@@ -55,149 +70,164 @@ class const GamePlayer({
   final bool canGoForward = false,
   final bool zenMode = false,
   final ClockPosition clockPosition = ClockPosition.right,
+
+  /// Whether this is the bar of the player holding the phone (the bottom one): a little taller and
+  /// wider than the opponent's.
+  final bool prominent = false,
   super.key,
 }) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final playerFontSize = isShortVerticalScreen(context) ? 15.0 : 16.0;
-
     final player = game.playerOf(side);
-
     final tournament = game.meta.tournament;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final nameFontSize = prominent && !isShortVerticalScreen(context) ? 16.0 : 15.0;
+    final textColor = isDark
+        ? Colors.white.withValues(alpha: 0.95)
+        : Colors.black.withValues(alpha: 0.87);
+    final infoColor = isDark
+        ? Colors.white.withValues(alpha: 0.6)
+        : Colors.black.withValues(alpha: 0.55);
 
-    final playerWidget = Column(
+    // First line: who is playing.
+    final nameLine = Row(
+      // As wide as its content, so the bar can hug it.
       mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!zenMode)
-          Row(
-            mainAxisAlignment: clockPosition == ClockPosition.right
-                ? MainAxisAlignment.start
-                : MainAxisAlignment.end,
-            children: [
-              if (matchupScore != null) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                  decoration: BoxDecoration(
-                    color: ColorScheme.of(context).primaryContainer,
-                    borderRadius: BorderRadius.circular(4.0),
-                  ),
-                  child: Text(
-                    _scoreDisplay(matchupScore!),
+        if (tournament?.ranks != null)
+          Text(
+            '#${side == Side.white ? tournament?.ranks?.white : tournament?.ranks?.black} ',
+            style: TextStyle(fontSize: nameFontSize, color: infoColor),
+          ),
+        if (player.user?.isPatron == true) ...[
+          PatronIcon(size: nameFontSize, color: player.user?.patronColor),
+          const SizedBox(width: 4),
+        ],
+        if (player.user?.title != null) ...[
+          Text(
+            player.user!.title!,
+            style: TextStyle(
+              fontSize: nameFontSize,
+              fontWeight: player.user?.title == 'BOT' ? null : FontWeight.bold,
+              color: player.user?.title == 'BOT'
+                  ? context.lichessColors.fancy
+                  : context.lichessColors.brag,
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+        Flexible(
+          child: Tooltip(
+            message: player.displayName(context.l10n),
+            child: Text(
+              player.displayName(context.l10n),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: nameFontSize,
+                fontWeight: FontWeight.w500,
+                color: textColor,
+              ),
+            ),
+          ),
+        ),
+        if (player.berserk == true) ...[
+          const SizedBox(width: 4),
+          Icon(
+            LichessIcons.body_cut,
+            color: LichessColors.brag,
+            size: nameFontSize,
+            semanticLabel: context.l10n.arenaBerserk,
+          ),
+        ],
+      ],
+    );
+
+    // Second line: the rating, then the captured pieces, or the time left to play the first move.
+    // Absent when there is none of that (an anonymous player before any capture).
+    final materialFormat = materialDifferenceFormat ?? MaterialDifferenceFormat.materialDifference;
+    final showMaterial =
+        timeToMove == null &&
+        materialDiff != null &&
+        materialFormat.visible &&
+        _hasMaterialToShow(materialDiff!, materialFormat);
+    final infoItems = [
+      if (player.rating != null)
+        RatingPrefAware(
+          isActiveGameOfCurrentUser: game.me != null && !game.finished && !game.aborted,
+          child: Text.rich(
+            TextSpan(
+              text: '${player.rating}${player.provisional == true ? '?' : ''}',
+              children: [
+                if (player.ratingDiff != null)
+                  TextSpan(
+                    text: ' ${player.ratingDiff! > 0 ? '+' : ''}${player.ratingDiff}',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: ColorScheme.of(context).onPrimaryContainer,
+                      color: player.ratingDiff! > 0
+                          ? context.lichessColors.good
+                          : player.ratingDiff! == 0
+                          ? context.lichessColors.brag
+                          : context.lichessColors.error,
                     ),
                   ),
-                ),
-                const SizedBox(width: 5),
               ],
-              if (tournament?.ranks != null)
-                Text(
-                  '#${side == Side.white ? tournament?.ranks?.white : tournament?.ranks?.black} ',
-                  style: TextStyle(fontSize: playerFontSize, color: textShade(context, 0.7)),
-                ),
-              if (player.user != null) ...[
-                Consumer(
-                  builder: (context, ref, _) {
-                    bool isPlayerConnected = player.onGame == true;
-                    if (mePlaying && socketUri != null) {
-                      final ping = ref.watch(socketPingProvider(socketUri));
-                      if (ping.rating == 0) {
-                        isPlayerConnected = false;
-                      }
-                    }
-                    return ConnectedIcon(
-                      isConnected: isPlayerConnected,
-                      shouldShowIsOnGameLabels: true,
-                      size: DefaultTextStyle.of(context).style.fontSize,
-                    );
-                  },
-                ),
-              ],
-              const SizedBox(width: 5),
-              if (player.user?.isPatron == true) ...[
-                PatronIcon(size: playerFontSize, color: player.user?.patronColor),
-                const SizedBox(width: 5),
-              ],
-              if (player.user?.title != null) ...[
-                Text(
-                  player.user!.title!,
-                  style: TextStyle(
-                    fontSize: playerFontSize,
-                    fontWeight: player.user?.title == 'BOT' ? null : FontWeight.bold,
-                    color: player.user?.title == 'BOT'
-                        ? context.lichessColors.fancy
-                        : context.lichessColors.brag,
-                  ),
-                ),
-                const SizedBox(width: 5),
-              ],
-              Flexible(
-                child: Tooltip(
-                  message: player.displayName(context.l10n),
-                  child: Text(
-                    player.displayName(context.l10n),
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: playerFontSize, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      // The first move has to be played in time, or the game is aborted.
+      if (timeToMove != null) MoveExpiration(timeToMove: timeToMove!, mePlaying: mePlaying),
+      if (showMaterial)
+        MaterialDifferenceDisplay(
+          materialDiff: materialDiff,
+          materialDifferenceFormat: materialFormat,
+        ),
+      if (matchupScore != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
+          decoration: BoxDecoration(
+            color: ColorScheme.of(context).primaryContainer,
+            borderRadius: BorderRadius.circular(4.0),
+          ),
+          child: Text(
+            _scoreDisplay(matchupScore!),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: ColorScheme.of(context).onPrimaryContainer,
+            ),
+          ),
+        ),
+    ];
+
+    final playerWidget = zenMode
+        ? const SizedBox.shrink()
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              nameLine,
+              // Slides the name up when the second line appears, rather than jumping.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(fontSize: 12.5, height: 1.2, color: infoColor),
+                  child: IconTheme.merge(
+                    data: IconThemeData(color: infoColor),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final (i, item) in infoItems.indexed) ...[
+                          if (i > 0) const SizedBox(width: 8.0),
+                          item,
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-              if (player.user?.flair != null) ...[
-                const SizedBox(width: 5),
-                HttpNetworkImageWidget(
-                  lichessFlairSrc(player.user!.flair!),
-                  errorBuilder: (_, _, _) => kEmptyWidget,
-                  width: 16,
-                  height: 16,
-                ),
-              ],
-              if (player.rating != null)
-                RatingPrefAware(
-                  isActiveGameOfCurrentUser: game.me != null && !game.finished && !game.aborted,
-                  child: Text.rich(
-                    TextSpan(
-                      text: ' ${player.rating}${player.provisional == true ? '?' : ''}',
-                      children: [
-                        if (player.ratingDiff != null)
-                          TextSpan(
-                            text: ' ${player.ratingDiff! > 0 ? '+' : ''}${player.ratingDiff}',
-                            style: TextStyle(
-                              color: player.ratingDiff! > 0
-                                  ? context.lichessColors.good
-                                  : player.ratingDiff! == 0
-                                  ? context.lichessColors.brag
-                                  : context.lichessColors.error,
-                            ),
-                          ),
-                      ],
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 14, color: textShade(context, 0.7)),
-                  ),
-                ),
-              if (player.berserk == true) ...[
-                const SizedBox(width: 5),
-                Icon(
-                  LichessIcons.body_cut,
-                  color: LichessColors.brag,
-                  size: playerFontSize,
-                  semanticLabel: context.l10n.arenaBerserk,
-                ),
-              ],
             ],
-          ),
-        if (timeToMove != null)
-          MoveExpiration(timeToMove: timeToMove!, mePlaying: mePlaying)
-        else
-          MaterialDifferenceDisplay(
-            materialDiff: materialDiff,
-            materialDifferenceFormat: materialDifferenceFormat,
-          ),
-      ],
-    );
+          );
 
     // When the opponent has left, the countdown / claim choices take the whole
     // table width (the clock is hidden) to leave enough room for the buttons.
@@ -213,49 +243,195 @@ class const GamePlayer({
       );
     }
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
+    final content = mePlaying && confirmMoveCallbacks != null && canGoForward == false
+        ? ConfirmMove(
+            onConfirm: confirmMoveCallbacks!.confirm,
+            onCancel: confirmMoveCallbacks!.cancel,
+          )
+        : shouldLinkToUserProfile
+        ? Consumer(
+            builder: (context, ref, _) {
+              return GestureDetector(
+                onTap: player.user != null
+                    ? () {
+                        if (mePlaying) {
+                          ref.invalidate(accountProvider);
+                        }
+                        Navigator.of(context).push(UserOrProfileScreen.buildRoute(player.user!));
+                      }
+                    : null,
+                child: playerWidget,
+              );
+            },
+          )
+        : playerWidget;
+
+    // A frosted glass pill: the avatar and the clock sit 4 px inside its ends.
+    final pillHeight = prominent ? _kProminentPillHeight : _kPillHeight;
+    final avatarRadius = pillHeight / 2 - _kPillInset;
+
+    final identity = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (clock != null && clockPosition == ClockPosition.left) Flexible(flex: 3, child: clock!),
-        if (mePlaying && confirmMoveCallbacks != null && canGoForward == false)
-          Expanded(
-            flex: 7,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16.0),
-              child: ConfirmMove(
-                onConfirm: confirmMoveCallbacks!.confirm,
-                onCancel: confirmMoveCallbacks!.cancel,
+        if (!zenMode) ...[
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              if (player.user != null)
+                UserAvatar(player.user!, radius: avatarRadius)
+              else
+                CircleAvatar(
+                  radius: avatarRadius,
+                  backgroundColor: const Color(0xFFD9DCE3),
+                  child: Icon(
+                    Icons.person_rounded,
+                    size: avatarRadius * 1.4,
+                    color: const Color(0xFF878C99),
+                  ),
+                ),
+              // Whether the player is in the game, as a dot on their avatar.
+              if (player.user != null)
+                Positioned(
+                  right: -1.0,
+                  bottom: -1.0,
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      bool isPlayerConnected = player.onGame == true;
+                      if (mePlaying && socketUri != null) {
+                        final ping = ref.watch(socketPingProvider(socketUri));
+                        if (ping.rating == 0) {
+                          isPlayerConnected = false;
+                        }
+                      }
+                      return Tooltip(
+                        message: isPlayerConnected ? 'Joined the game' : 'Left the game',
+                        child: Container(
+                          width: 11.0,
+                          height: 11.0,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isPlayerConnected
+                                ? context.lichessColors.good
+                                : const Color(0xFF8A8F9C),
+                            border: Border.all(color: const Color(0xFF2A2638), width: 2.0),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 12.0),
+        ],
+        Flexible(child: content),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Center(
+          child: ConstrainedBox(
+            // At least the bar's minimum width, more if its content needs it, never wider than the
+            // table.
+            constraints: BoxConstraints(
+              minWidth:
+                  constraints.maxWidth *
+                  (prominent ? _kProminentPillMinWidthFactor : _kPillMinWidthFactor),
+              maxWidth: constraints.maxWidth,
+              minHeight: pillHeight,
+            ),
+            child: FrostedGlass(
+              radius: pillHeight / 2,
+              // Leaning to liquid glass: a light blur that keeps the colours behind it vivid, a
+              // clear tint (milkier in light mode, so dark text reads on it), a bright rim.
+              blur: 7.0,
+              saturation: 1.3,
+              tint: isDark ? 0.06 : 0.35,
+              edge: 1.3,
+              bottomGlow: 0.14,
+              shadow: isDark ? 0.18 : 0.08,
+              child: Padding(
+                padding: const EdgeInsets.all(_kPillInset),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  // The clock goes to the far end when the bar is wider than its content.
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (clock != null && clockPosition == ClockPosition.left) ...[
+                      clock!,
+                      const SizedBox(width: 14.0),
+                    ],
+                    Flexible(child: identity),
+                    if (clock != null && clockPosition == ClockPosition.right) ...[
+                      const SizedBox(width: 14.0),
+                      clock!,
+                    ],
+                  ],
+                ),
               ),
             ),
-          )
-        else
-          Expanded(
-            flex: 7,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16.0),
-              child: shouldLinkToUserProfile
-                  ? Consumer(
-                      builder: (context, ref, _) {
-                        return GestureDetector(
-                          onTap: player.user != null
-                              ? () {
-                                  if (mePlaying) {
-                                    ref.invalidate(accountProvider);
-                                  }
-                                  Navigator.of(context)
-                                      .push(UserOrProfileScreen.buildRoute(player.user!));
-                                }
-                              : null,
-                          child: playerWidget,
-                        );
-                      },
-                    )
-                  : playerWidget,
-            ),
           ),
-        if (clock != null && clockPosition == ClockPosition.right) Flexible(flex: 3, child: clock!),
-      ],
+        );
+      },
+    );
+  }
+
+  /// Whether [diff] has something to show in [format]: pieces up, a score, or checks given.
+  static bool _hasMaterialToShow(MaterialDiffSide diff, MaterialDifferenceFormat format) =>
+      (format == MaterialDifferenceFormat.capturedPieces ? diff.capturedPieces : diff.pieces).values
+          .any((count) => count > 0) ||
+      diff.score > 0 ||
+      (diff.checksGiven ?? 0) > 0;
+}
+
+/// The clock of a player bar ([GamePlayer]): a capsule that fits inside the bar, white while it
+/// runs, dark and dim while it doesn't. It keeps one width through a game, so the bar doesn't change
+/// size as the time loses a digit or gains tenths.
+class const PlayerBarClock({
+  required final Duration timeLeft,
+  required final bool active,
+  final Duration? emergencyThreshold,
+  final ClockTenths? clockTenths,
+
+  /// Whether it sits in the [GamePlayer.prominent] bar, which is taller.
+  final bool prominent = false,
+
+  /// Key of the inner [Clock], for tests that look the clock up.
+  final Key? clockKey,
+  super.key,
+}) extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Clock(
+      key: clockKey,
+      timeLeft: timeLeft,
+      active: active,
+      emergencyThreshold: emergencyThreshold,
+      clockTenths: clockTenths,
+      // A capsule as tall as the bar's inside, with the bar's inner radius, wide enough for "00:00"
+      // and "0:09.8".
+      padding: EdgeInsets.symmetric(vertical: prominent ? 6.0 : 5.0, horizontal: 12.0),
+      borderRadius: BorderRadius.circular(
+        (prominent ? _kProminentPillHeight : _kPillHeight) / 2 - _kPillInset,
+      ),
+      fontScale: prominent ? 0.86 : 0.78,
+      minWidth: prominent ? 80.0 : 74.0,
+      clockStyle: ClockStyle(
+        backgroundColor: isDark
+            ? Colors.black.withValues(alpha: 0.16)
+            : Colors.black.withValues(alpha: 0.06),
+        textColor: isDark
+            ? Colors.white.withValues(alpha: 0.62)
+            : Colors.black.withValues(alpha: 0.5),
+        activeBackgroundColor: isDark
+            ? Colors.white.withValues(alpha: 0.95)
+            : const Color(0xFF16161A),
+        activeTextColor: isDark ? const Color(0xFF16161A) : Colors.white,
+        emergencyBackgroundColor: context.lichessColors.error.withValues(alpha: 0.8),
+        emergencyTextColor: Colors.white,
+      ),
     );
   }
 }
@@ -460,6 +636,7 @@ class _MoveExpirationState() extends ConsumerState<MoveExpiration> {
             context.l10n.nbSecondsToPlayTheFirstMove(secs),
             style: TextStyle(color: widget.mePlaying && emerg ? context.lichessColors.error : null),
           )
-        : const Text('');
+        // Nothing rather than an empty line, so the player bar keeps a single line until then.
+        : const SizedBox.shrink();
   }
 }

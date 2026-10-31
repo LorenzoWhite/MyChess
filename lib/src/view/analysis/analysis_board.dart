@@ -229,12 +229,19 @@ abstract class AnalysisBoardState<
     return bestMoveShapes.toSet();
   }
 
+  /// The badge drawn on the destination square of the current move.
+  ///
+  /// Subclasses can replace it, e.g. with a game report's judgement when no PGN annotation exists.
+  @protected
+  Annotation? annotationFor(AnalysisCurrentNodeInterface node) =>
+      showAnnotations ? makeAnnotation(node.nags) : null;
+
   @override
   Widget build(BuildContext context) {
     final boardPrefs = ref.watch(boardPreferencesProvider);
 
     final currentNode = analysisState.currentNode;
-    final annotation = showAnnotations ? makeAnnotation(currentNode.nags) : null;
+    final annotation = annotationFor(currentNode);
     final sanMove = currentNode.sanMove;
 
     final externalShapes = {..._bestMoveShapes(boardPrefs.pieceSet.assets), ...extraShapes.unlock};

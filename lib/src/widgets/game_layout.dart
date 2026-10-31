@@ -64,6 +64,7 @@ class GameLayout extends ConsumerStatefulWidget {
     this.onSelectMove,
     this.moveListBuilder,
     this.boardOverlay,
+    this.boardForeground,
     this.errorMessage,
     this.boardKey,
     this.zenMode = false,
@@ -94,6 +95,7 @@ class GameLayout extends ConsumerStatefulWidget {
       onSelectMove = null,
       moveListBuilder = null,
       boardOverlay = null,
+      boardForeground = null,
       boardKey = null,
       zenMode = false,
       userActionsBar = null,
@@ -166,6 +168,10 @@ class GameLayout extends ConsumerStatefulWidget {
 
   /// Optional widget that will be displayed on top of the board.
   final Widget? boardOverlay;
+
+  /// Widget drawn over the board's squares, sized to cover them exactly. See
+  /// [BoardWidget.boardForeground].
+  final Widget? boardForeground;
 
   /// If true, the move list will be hidden
   final bool zenMode;
@@ -462,6 +468,7 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
                   settings: settings,
                   boardKey: widget.boardKey,
                   boardOverlay: widget.boardOverlay,
+                  boardForeground: widget.boardForeground,
                   error: widget.errorMessage,
                 ),
                 const SizedBox(width: 16.0),
@@ -553,6 +560,7 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
                   settings: settings,
                   boardKey: widget.boardKey,
                   boardOverlay: widget.boardOverlay,
+                  boardForeground: widget.boardForeground,
                   error: widget.errorMessage,
                 ),
               ),

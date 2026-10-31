@@ -1,5 +1,6 @@
 import 'package:app_settings/app_settings.dart';
 import 'package:cupertino_ui/cupertino_ui.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/experimental/mutation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/l10n/l10n.dart';
@@ -12,6 +13,7 @@ import 'package:lichess_mobile/src/styles/styles.dart';
 import 'package:lichess_mobile/src/utils/l10n.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
 import 'package:lichess_mobile/src/utils/navigation.dart';
+import 'package:lichess_mobile/src/view/game/match_intro_preview_screen.dart';
 import 'package:lichess_mobile/src/view/home/home_tab_screen.dart';
 import 'package:lichess_mobile/src/view/home/quick_matches_sheet.dart';
 import 'package:lichess_mobile/src/view/settings/account_preferences_screen.dart';
@@ -179,6 +181,18 @@ class const SettingsScreen({super.key}) extends ConsumerWidget {
                   Navigator.of(context).push(AppLogSettingsScreen.buildRoute());
                 },
               ),
+              if (!kReleaseMode)
+                ListTile(
+                  leading: const Icon(Icons.animation),
+                  title: const Text('Match intro preview'),
+                  subtitle: const Text('Developer builds only'),
+                  trailing: Theme.of(context).platform == TargetPlatform.iOS
+                      ? const CupertinoListTileChevron()
+                      : null,
+                  onTap: () {
+                    Navigator.of(context).push(MatchIntroPreviewScreen.buildRoute());
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.star_outline),
                 title: Text(context.l10n.mobileRateThisApp),

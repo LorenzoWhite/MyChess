@@ -17,12 +17,14 @@ class BottomBar extends StatelessWidget {
     this.mainAxisAlignment = MainAxisAlignment.spaceAround,
     this.expandChildren = true,
     this.cupertinoGlass = false,
+    this.contentOpacity,
   });
 
   const new empty({this.cupertinoGlass = false})
     : children = const [],
       expandChildren = true,
-      mainAxisAlignment = MainAxisAlignment.spaceAround;
+      mainAxisAlignment = MainAxisAlignment.spaceAround,
+      contentOpacity = null;
 
   /// Children to display in the bottom bar's [Row]. Typically instances of [BottomBarButton], or
   /// [BottomBarGroup]s of them.
@@ -39,6 +41,10 @@ class BottomBar extends StatelessWidget {
   /// their label. Before iOS 26 ([useLiquidGlass]), the bar is translucent instead
   /// ([BlurredBarBackground]), with plain buttons. Defaults to false.
   final bool cupertinoGlass;
+
+  /// Opacity of the bar's buttons, to fade them in or out while the bar itself stays in place.
+  /// Null means fully opaque.
+  final Animation<double>? contentOpacity;
 
   /// Whether [context] is in a [BottomBar] with liquid glass buttons, for a custom button that
   /// draws itself as a [BottomBarGlassButton] there.
@@ -57,6 +63,8 @@ class BottomBar extends StatelessWidget {
     final ungrouped = glass
         ? children
         : children.expand((child) => child is BottomBarGroup ? child.children : [child]).toList();
+    Widget fadeContent(Widget content) =>
+        contentOpacity == null ? content : FadeTransition(opacity: contentOpacity!, child: content);
     final bar = glass
         ? Material(
             type: MaterialType.transparency,
@@ -71,7 +79,7 @@ class BottomBar extends StatelessWidget {
                 ),
                 child: SizedBox(
                   height: _kGlassCapsuleHeight,
-                  child: _GlassBottomBarScope(child: _GlassBarRow(children: children)),
+                  child: _GlassBottomBarScope(child: fadeContent(_GlassBarRow(children: children))),
                 ),
               ),
             ),
@@ -81,11 +89,13 @@ class BottomBar extends StatelessWidget {
             elevation: isIOS && cupertinoGlass ? 0.0 : null,
             height: kBottomBarHeight,
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            child: Row(
-              mainAxisAlignment: mainAxisAlignment,
-              children: expandChildren
-                  ? ungrouped.map((child) => Expanded(child: child)).toList()
-                  : ungrouped,
+            child: fadeContent(
+              Row(
+                mainAxisAlignment: mainAxisAlignment,
+                children: expandChildren
+                    ? ungrouped.map((child) => Expanded(child: child)).toList()
+                    : ungrouped,
+              ),
             ),
           );
 

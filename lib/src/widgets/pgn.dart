@@ -6,6 +6,9 @@ import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/model/account/account_preferences.dart';
+import 'package:lichess_mobile/src/model/analysis/game_report_controller.dart';
+import 'package:lichess_mobile/src/model/analysis/move_quality.dart';
+import 'package:lichess_mobile/src/model/common/id.dart';
 import 'package:lichess_mobile/src/model/common/node.dart';
 import 'package:lichess_mobile/src/model/common/uci.dart';
 import 'package:lichess_mobile/src/styles/lichess_colors.dart';
@@ -154,6 +157,9 @@ class const DebouncedPgnTreeView({
   ///
   /// Either [PgnTreeDisplayMode.twoColumn] or [PgnTreeDisplayMode.inlineNotation].
   final PgnTreeDisplayMode displayMode = PgnTreeDisplayMode.twoColumn,
+
+  /// Analysis context whose game report should annotate the moves, if one has been run.
+  final StringId? reportContextId,
 }) extends ConsumerStatefulWidget {
   @override
   ConsumerState<DebouncedPgnTreeView> createState() => _DebouncedPgnTreeViewState();
@@ -251,6 +257,7 @@ class _DebouncedPgnTreeViewState() extends ConsumerState<DebouncedPgnTreeView> {
         showTopDivider: widget.showTopDivider,
         displayMode: widget.displayMode,
         notifier: widget.notifier,
+        reportContextId: widget.reportContextId,
       ),
     );
   }
@@ -291,6 +298,9 @@ typedef _PgnTreeViewParams = ({
 
   /// Callbacks for when the user interacts with the tree view, e.g. selecting a different move.
   PgnTreeNotifier? notifier,
+
+  /// Analysis context whose game report should annotate the moves, if one has been run.
+  StringId? reportContextId,
 });
 
 /// Filter node children when computer analysis is disabled
@@ -1184,6 +1194,15 @@ class const InlineMove({
 
     final nag = params.shouldShowAnnotations ? branch.nags?.firstOrNull : null;
     final ply = branch.position.ply;
+    final reportContextId = params.reportContextId;
+    final reportedQuality = reportContextId == null
+        ? null
+        : ref.watch(
+            gameReportProvider(reportContextId).select((s) => s.report?.atPly(ply)?.quality),
+          );
+    final reportedNag = reportedQuality == null ? null : nagForQuality(reportedQuality);
+    // A PGN annotation wins over the report: it was put there on purpose.
+    final annotationNag = nag ?? reportedNag;
 
     final eval = params.shouldShowComputerAnalysis && canShowEval
         ? branch.eval ?? branch.serverEval
@@ -1235,9 +1254,14 @@ class const InlineMove({
                       color: isPremove
                           // TODO Possibly choose a more suitable color
                           ? LichessColors.brag
-                          : _textColor(context, isCurrentMove ? 1 : 0.9, nag: nag),
+                          : _textColor(context, isCurrentMove ? 1 : 0.9, nag: annotationNag),
                     ),
                   ),
+                  if (reportedNag != null && nag == null)
+                    TextSpan(
+                      text: ' ${moveAnnotationChar([reportedNag])}',
+                      style: moveTextStyle.copyWith(color: _nagColor(context, reportedNag)),
+                    ),
                 ],
               ),
             ),

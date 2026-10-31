@@ -4,6 +4,7 @@ import 'package:chessground/chessground.dart';
 import 'package:collection/collection.dart';
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:dartchess/dartchess.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/model/account/account_preferences.dart';
 import 'package:lichess_mobile/src/model/account/account_repository.dart';
@@ -32,13 +33,13 @@ import 'package:lichess_mobile/src/view/game/game_player.dart';
 import 'package:lichess_mobile/src/view/game/game_result_dialog.dart';
 import 'package:lichess_mobile/src/view/game/game_screen_providers.dart';
 import 'package:lichess_mobile/src/view/game/game_settings.dart';
+import 'package:lichess_mobile/src/view/game/match_intro.dart';
 import 'package:lichess_mobile/src/view/tournament/tournament_screen.dart';
 import 'package:lichess_mobile/src/widgets/adaptive_action_sheet.dart';
 import 'package:lichess_mobile/src/widgets/adaptive_bottom_sheet.dart';
 import 'package:lichess_mobile/src/widgets/board.dart';
 import 'package:lichess_mobile/src/widgets/bottom_bar.dart';
 import 'package:lichess_mobile/src/widgets/buttons.dart';
-import 'package:lichess_mobile/src/widgets/clock.dart';
 import 'package:lichess_mobile/src/widgets/feedback.dart';
 import 'package:lichess_mobile/src/widgets/game_layout.dart';
 import 'package:lichess_mobile/src/widgets/move_list.dart';
@@ -97,6 +98,11 @@ class const GameBody({
   ///
   /// Used to set gestures exclusion on android.
   required final GlobalKey boardKey,
+
+  /// The match intro to play when the game first shows, if it replaces a search screen or a
+  /// finished game. See [MatchIntro].
+  final MatchIntro? intro,
+  super.key,
 }) extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -129,6 +135,7 @@ class const GameBody({
           boardKey: boardKey,
           onLoadGameCallback: onLoadGameCallback,
           onNewOpponentCallback: onNewOpponentCallback,
+          intro: intro,
         );
       case _GamePhase.refreshing:
         final value = ref.read(ctrlProvider).requireValue;
@@ -254,13 +261,29 @@ class const _PlayableGameBoard({
   required final GlobalKey boardKey,
   required final void Function(GameFullId id) onLoadGameCallback,
   required final void Function(PlayableGame game) onNewOpponentCallback,
+  final MatchIntro? intro,
 }) extends ConsumerStatefulWidget {
   @override
   ConsumerState<_PlayableGameBoard> createState() => _PlayableGameBoardState();
 }
 
-class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
+class _PlayableGameBoardState()
+    extends ConsumerState<_PlayableGameBoard>
+    with SingleTickerProviderStateMixin {
   late final ChessboardController _controller;
+
+  /// Drives the match intro, if one plays. [_PlayableGameBoard.intro] is read only in [initState]:
+  /// the intro plays once, when the board first shows, and the screen drops it right after.
+  AnimationController? _intro;
+
+  /// The intro played, kept from [_PlayableGameBoard.intro]. See [MatchIntro].
+  MatchIntro? _introParams;
+  MatchIntroTimeline _introTimeline = const MatchIntroTimeline();
+
+  /// The pieces the intro drops onto the board. Until they have landed ([_introLanded]) the board
+  /// itself is empty; it then takes the real position.
+  Pieces? _introPieces;
+  bool _introLanded = false;
 
   /// Ply of the position currently shown on the board. Used to tell a forward
   /// move (opponent move) from a position revert (takeback), so a queued premove
@@ -273,25 +296,66 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
   void initState() {
     super.initState();
     final state = ref.read(_ctrlProvider).requireValue;
-    final boardPrefs = ref.read(boardPreferencesProvider);
     _lastPly = state.currentPosition.ply;
+
+    final intro = widget.intro;
+    if (intro != null) {
+      intro.onStarted();
+      _introParams = intro;
+      _introTimeline = intro.timeline;
+      _introPieces = readFen(state.currentPosition.fen);
+      _intro = AnimationController(vsync: this, duration: _introTimeline.duration)
+        ..addListener(_onIntroTick)
+        ..forward();
+    }
+
     _controller = ChessboardController(
-      game: buildGameData(
-        fen: state.currentPosition.fen,
-        variant: state.game.meta.variant,
-        position: state.currentPosition,
-        playerSide: _playerSide(state),
-        lastMove: state.game.moveAt(state.stepCursor),
-        castlingMethod: boardPrefs.castlingMethod,
-        boardHighlights: boardPrefs.boardHighlights,
-      ),
+      game: intro != null
+          ? GameData(
+              fen: kEmptyFEN,
+              playerSide: PlayerSide.none,
+              sideToMove: state.currentPosition.turn,
+              validMoves: const <Square, Set<Square>>{},
+              lastMove: null,
+              kingSquareInCheck: null,
+            )
+          : _gameDataOf(state),
     );
   }
 
   @override
   void dispose() {
+    _intro?.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  GameData _gameDataOf(GameState state) {
+    final boardPrefs = ref.read(boardPreferencesProvider);
+    return buildGameData(
+      fen: state.currentPosition.fen,
+      variant: state.game.meta.variant,
+      position: state.currentPosition,
+      playerSide: _playerSide(state),
+      lastMove: state.game.moveAt(state.stepCursor),
+      castlingMethod: boardPrefs.castlingMethod,
+      boardHighlights: boardPrefs.boardHighlights,
+    );
+  }
+
+  void _onIntroTick() {
+    if (!_introLanded && _intro!.value >= _introTimeline.piecesLanded) {
+      _introLanded = true;
+      final state = ref.read(_ctrlProvider).value;
+      if (state != null) _controller.updatePosition(_gameDataOf(state), animate: false);
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  /// Jumps to the end of the intro: the board shows the real position and everything is in place.
+  void _skipIntro() {
+    final intro = _intro;
+    if (intro != null && intro.isAnimating) intro.value = 1.0;
   }
 
   PlayerSide _playerSide(GameState state) {
@@ -303,6 +367,9 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
   /// rebuilding this widget. Called from [ref.listen] whenever the position-relevant
   /// slice of the state changes.
   void _applyBoardUpdate() {
+    // A position change during the intro (an opponent's very quick first move, a resync) must show
+    // straight away: land the pieces first.
+    _skipIntro();
     final state = ref.read(_ctrlProvider).value;
     if (state == null) return;
     final boardPrefs = ref.read(boardPreferencesProvider);
@@ -412,6 +479,10 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
         ? boardPrefs.pieceAnimationDuration
         : Duration.zero;
 
+    final intro = _intro ?? kAlwaysCompleteAnimation;
+    // After a previous game, its tables were already in place: they don't slide in again.
+    final tablesIntro = _introParams?.tablesEnter == true ? intro : kAlwaysCompleteAnimation;
+
     return FocusDetector(
       onFocusRegained: () {
         if (context.mounted) {
@@ -425,43 +496,78 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
       },
       child: WakelockWidget(
         shouldEnableOnFocusGained: () => shell.playable,
-        child: GameLayout(
-          boardKey: widget.boardKey,
-          controllerParams: ControllerBoardParams(
-            controller: _controller,
-            variant: shell.variant,
-            pockets: shell.pockets,
-            onMove: (move, {viaDragAndDrop}) {
-              ref.read(_ctrlProvider.notifier).userMove(move, viaDragAndDrop: viaDragAndDrop);
-            },
-          ),
-          boardSettingsOverrides: BoardSettingsOverrides(
-            animationDuration: animationDuration,
-            autoQueenPromotion: shell.canAutoQueen,
-            autoQueenPromotionOnPremove: shell.canAutoQueenOnPremove,
-            blindfoldMode: blindfoldMode,
-            enablePremoves: shell.canPremove && boardPrefs.premoves,
-          ),
-          orientation: orientation,
-          topTable: _GamePlayerTable(
-            gameId: widget.gameId,
-            side: topSide,
-            clockKey: topSide == Side.white ? widget.whiteClockKey : widget.blackClockKey,
-          ),
-          bottomTable: _GamePlayerTable(
-            gameId: widget.gameId,
-            side: bottomSide,
-            clockKey: bottomSide == Side.white ? widget.whiteClockKey : widget.blackClockKey,
-            // The claim-win countdown / choices are the user's action, so they
-            // are shown in the bottom table only.
-            showOpponentLeftCountdown: true,
-          ),
-          moveListBuilder: (type) => _GameMoveList(gameId: widget.gameId, type: type),
-          zenMode: shell.zen,
-          userActionsBar: _GameBottomBar(
-            id: widget.gameId,
-            onLoadGameCallback: widget.onLoadGameCallback,
-            onNewOpponentCallback: widget.onNewOpponentCallback,
+        // Any touch skips the match intro, so it can never get in the way of playing.
+        child: Listener(
+          onPointerDown: _intro != null ? (_) => _skipIntro() : null,
+          child: GameLayout(
+            boardKey: widget.boardKey,
+            // Kept for the whole game when an intro plays, so the board's tree never changes.
+            boardOverlay: _introParams?.card != null
+                ? MatchIntroCard(
+                    animation: intro,
+                    timeline: _introTimeline,
+                    card: _introParams!.card!,
+                  )
+                : null,
+            // Paints nothing once the pieces have landed, but stays for the same reason.
+            boardForeground: _introPieces != null && !blindfoldMode
+                ? MatchIntroPieces(
+                    animation: intro,
+                    timeline: _introTimeline,
+                    pieces: _introPieces!,
+                    orientation: orientation,
+                    clearing: _introParams?.clearing,
+                    pieceAssets: boardPrefs.pieceSet.assets,
+                  )
+                : null,
+            controllerParams: ControllerBoardParams(
+              controller: _controller,
+              variant: shell.variant,
+              pockets: shell.pockets,
+              onMove: (move, {viaDragAndDrop}) {
+                ref.read(_ctrlProvider.notifier).userMove(move, viaDragAndDrop: viaDragAndDrop);
+              },
+            ),
+            boardSettingsOverrides: BoardSettingsOverrides(
+              animationDuration: animationDuration,
+              autoQueenPromotion: shell.canAutoQueen,
+              autoQueenPromotionOnPremove: shell.canAutoQueenOnPremove,
+              blindfoldMode: blindfoldMode,
+              enablePremoves: shell.canPremove && boardPrefs.premoves,
+            ),
+            orientation: orientation,
+            topTable: MatchIntroEntrance(
+              animation: tablesIntro,
+              interval: _introTimeline.topTable,
+              from: const Offset(0.0, -0.35),
+              child: _GamePlayerTable(
+                gameId: widget.gameId,
+                side: topSide,
+                clockKey: topSide == Side.white ? widget.whiteClockKey : widget.blackClockKey,
+              ),
+            ),
+            bottomTable: MatchIntroEntrance(
+              animation: tablesIntro,
+              interval: _introTimeline.bottomTable,
+              from: const Offset(0.0, 0.35),
+              child: _GamePlayerTable(
+                gameId: widget.gameId,
+                side: bottomSide,
+                clockKey: bottomSide == Side.white ? widget.whiteClockKey : widget.blackClockKey,
+                // The claim-win countdown / choices are the user's action, so they
+                // are shown in the bottom table only.
+                showOpponentLeftCountdown: true,
+                prominent: true,
+              ),
+            ),
+            moveListBuilder: (type) => _GameMoveList(gameId: widget.gameId, type: type),
+            zenMode: shell.zen,
+            userActionsBar: _GameBottomBar(
+              id: widget.gameId,
+              onLoadGameCallback: widget.onLoadGameCallback,
+              onNewOpponentCallback: widget.onNewOpponentCallback,
+              contentOpacity: _intro?.drive(CurveTween(curve: _introTimeline.bottomBar)),
+            ),
           ),
         ),
       ),
@@ -513,6 +619,9 @@ class const _GamePlayerTable({
   /// Whether this table displays the claim-win countdown and choices when the
   /// opponent has left. Only the bottom table (the user's) sets this.
   final bool showOpponentLeftCountdown = false,
+
+  /// Whether this is the bottom table, whose bar stands out. See [GamePlayer.prominent].
+  final bool prominent = false,
 }) extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -574,6 +683,7 @@ class const _GamePlayerTable({
     return GamePlayer(
       game: game,
       side: side,
+      prominent: prominent,
       socketUri: GameController.socketUri(data.gameFullId),
       matchupScore: matchupData?.users[sideUser!.id],
       materialDiff: boardPrefs.materialDifferenceFormat.visible
@@ -613,9 +723,10 @@ class const _GamePlayerTable({
                 key: clockKey,
                 valueListenable: side == Side.white ? data.liveClock!.white : data.liveClock!.black,
                 builder: (context, value, _) {
-                  return Clock(
-                    key: ValueKey('${side.name}-clock'),
+                  return PlayerBarClock(
+                    clockKey: ValueKey('${side.name}-clock'),
                     timeLeft: value,
+                    prominent: prominent,
                     active: data.activeClockSide == side,
                     emergencyThreshold: youAre == side ? game.meta.clock?.emergency : null,
                     clockTenths: clockTenths,
@@ -671,6 +782,9 @@ class const _GameBottomBar({
   required final GameFullId id,
   required final void Function(GameFullId id) onLoadGameCallback,
   required final void Function(PlayableGame game) onNewOpponentCallback,
+
+  /// Fades the buttons in during the match intro. See [BottomBar.contentOpacity].
+  final Animation<double>? contentOpacity,
 }) extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -716,6 +830,7 @@ class const _GameBottomBar({
 
     return BottomBar(
       cupertinoGlass: true,
+      contentOpacity: contentOpacity,
       children: [
         BottomBarButton(
           label: context.l10n.menu,

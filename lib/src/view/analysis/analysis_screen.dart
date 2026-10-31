@@ -21,6 +21,7 @@ import 'package:lichess_mobile/src/view/analysis/analysis_settings_screen.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_share_screen.dart';
 import 'package:lichess_mobile/src/view/analysis/conditional_premoves.dart';
 import 'package:lichess_mobile/src/view/analysis/game_analysis_board.dart';
+import 'package:lichess_mobile/src/view/analysis/game_report_sheet.dart';
 import 'package:lichess_mobile/src/view/analysis/retro_screen.dart';
 import 'package:lichess_mobile/src/view/analysis/server_analysis.dart';
 import 'package:lichess_mobile/src/view/analysis/tree_view.dart';
@@ -523,6 +524,23 @@ class const _BottomBar({
     return showAdaptiveActionSheet(
       context: context,
       actions: [
+        BottomSheetAction(
+          makeLabel: (context) => const Text('Game report'),
+          onPressed: () {
+            final pgn = switch (options) {
+              Pgn(:final pgn) => pgn,
+              ArchivedGame() => analysisState.archivedGame?.makePgn() ?? '',
+              _ => '',
+            };
+            if (pgn.isEmpty) return;
+            showGameReportSheet(
+              context,
+              id: options.contextId,
+              variant: analysisState.variant,
+              pgn: pgn,
+            );
+          },
+        ),
         BottomSheetAction(
           makeLabel: (context) => Text(context.l10n.settingsSettings),
           onPressed: () =>

@@ -35,9 +35,11 @@ import 'package:lichess_mobile/src/styles/lichess_icons.dart';
 import 'package:lichess_mobile/src/view/chat/chat_screen.dart';
 import 'package:lichess_mobile/src/view/game/correspondence_clock_widget.dart';
 import 'package:lichess_mobile/src/view/game/game_body.dart';
+import 'package:lichess_mobile/src/view/game/game_loading_board.dart';
 import 'package:lichess_mobile/src/view/game/game_player.dart';
 import 'package:lichess_mobile/src/view/game/game_screen.dart';
 import 'package:lichess_mobile/src/view/game/game_screen_providers.dart';
+import 'package:lichess_mobile/src/view/game/match_intro.dart';
 import 'package:lichess_mobile/src/widgets/bottom_bar.dart';
 import 'package:lichess_mobile/src/widgets/clock.dart';
 import 'package:lichess_mobile/src/widgets/game_layout.dart';
@@ -154,14 +156,24 @@ void main() {
       );
     }, variant: kPlatformVariant);
 
-    testWidgets('a game from the pool with a seek', (WidgetTester tester) async {
+    /// Opens a lobby seek, has the server match it, and sends the game data. Returns the board's
+    /// top left corner when the screen opened, which must never move.
+    Future<Offset> matchLobbySeek(WidgetTester tester, {bool disableAnimations = false}) async {
+      const screen = GameScreen(
+        source: LobbySource(
+          GameSeek(clock: (Duration(minutes: 3), Duration(seconds: 2)), rated: true),
+        ),
+      );
       final app = await makeTestProviderScopeApp(
         tester,
-        home: const GameScreen(
-          source: LobbySource(
-            GameSeek(clock: (Duration(minutes: 3), Duration(seconds: 2)), rated: true),
-          ),
-        ),
+        home: disableAnimations
+            ? Builder(
+                builder: (context) => MediaQuery(
+                  data: MediaQuery.of(context).copyWith(disableAnimations: true),
+                  child: screen,
+                ),
+              )
+            : screen,
         overrides: {
           lichessClientProvider: lichessClientProvider.overrideWith(
             (ref) => LichessClient(client, ref),
@@ -170,11 +182,23 @@ void main() {
       );
       await tester.pumpWidget(app);
 
+      // The board is empty while searching: the side is not known yet.
       expect(find.byType(Chessboard), findsOneWidget);
       expect(getBoardPieces(tester), isEmpty);
-      expect(find.text('Waiting for opponent to join...'), findsOneWidget);
+      expect(find.text('Finding opponent'), findsOneWidget);
       expect(find.text('3+2'), findsOneWidget);
       expect(find.widgetWithText(BottomBarButton, 'Cancel'), findsOneWidget);
+
+      Finder searchCard(String status) =>
+          find.ancestor(of: find.text(status), matching: find.byType(Card));
+      expect(
+        find.descendant(
+          of: searchCard('Finding opponent'),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      final searchCardSize = tester.getSize(searchCard('Finding opponent'));
 
       final initialBoardPosition = tester.getTopLeft(find.byType(Chessboard));
 
@@ -187,13 +211,35 @@ void main() {
       ]);
       // wait for socket message handling
       await tester.pump(const Duration(milliseconds: 1));
+      // let the card's title swap finish
+      await tester.pump(const Duration(milliseconds: 250));
 
-      // now the game controller is loading
+      // the search screen stays up while the game loads: the card says the opponent is found, and
+      // Cancel fades out (the bar stays)
       expect(find.byType(Chessboard), findsOneWidget);
       expect(getBoardPieces(tester), isEmpty);
-      expect(find.text('Waiting for opponent to join...'), findsNothing);
-      expect(find.text('3+2'), findsNothing);
-      expect(find.widgetWithText(BottomBarButton, 'Cancel'), findsNothing);
+      expect(find.text('Finding opponent'), findsNothing);
+      expect(find.text('Opponent found'), findsOneWidget);
+      // The spinner turned into a check mark, and the card kept its size.
+      expect(
+        find.descendant(
+          of: searchCard('Opponent found'),
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.getSize(searchCard('Opponent found')), searchCardSize);
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find.ancestor(
+                of: find.widgetWithText(BottomBarButton, 'Cancel'),
+                matching: find.byType(AnimatedOpacity),
+              ),
+            )
+            .opacity,
+        0.0,
+      );
       expect(
         tester.getTopLeft(find.byType(Chessboard)),
         initialBoardPosition,
@@ -211,19 +257,149 @@ void main() {
           blackUserName: 'Steven',
         ),
       ]);
-      // wait for socket message handling
+      // wait for socket message handling, then for the screen to show the game
       await tester.pump();
+      await tester.pump();
+      expect(find.byType(GameBody), findsOneWidget);
+
+      return initialBoardPosition;
+    }
+
+    testWidgets('a game from the pool with a seek plays the match intro', (
+      WidgetTester tester,
+    ) async {
+      final initialBoardPosition = await matchLobbySeek(tester);
+
+      // The game board took over: the card is still drawn over it, the pieces have not landed yet.
+      expect(find.text('Opponent found'), findsOneWidget);
+      expect(getBoardPieces(tester), isEmpty);
+      expect(
+        tester.getTopLeft(find.byType(Chessboard)),
+        initialBoardPosition,
+        reason: 'board position should not change',
+      );
+
+      await tester.pump(const MatchIntroTimeline().duration);
 
       expect(getBoardPieces(tester).length, 32);
       expect(find.text('Peter'), findsOneWidget);
       expect(find.text('Steven'), findsOneWidget);
-      expect(find.text('Waiting for opponent to join...'), findsNothing);
+      expect(find.text('Opponent found'), findsNothing);
       expect(find.text('3+2'), findsNothing);
       expect(
         tester.getTopLeft(find.byType(Chessboard)),
         initialBoardPosition,
         reason: 'board position should not change',
       );
+    }, variant: kPlatformVariant);
+
+    testWidgets('touching the screen skips the match intro', (WidgetTester tester) async {
+      await matchLobbySeek(tester);
+      expect(getBoardPieces(tester), isEmpty);
+
+      final gesture = await tester.startGesture(tester.getCenter(find.byType(Chessboard)));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(getBoardPieces(tester).length, 32);
+      expect(find.text('Opponent found'), findsNothing);
+    }, variant: kPlatformVariant);
+
+    testWidgets('new opponent clears the board, then plays the match intro again', (
+      WidgetTester tester,
+    ) async {
+      await matchLobbySeek(tester);
+      await tester.pump(const MatchIntroTimeline().duration);
+      expect(getBoardPieces(tester).length, 32);
+
+      // The game ends: the result dialog offers a new opponent.
+      sendServerSocketMessages(GameController.socketUri(testGameFullId), [
+        '{"t":"endData","d":{"status":"resign","winner":"white","clock":{"wc":17800,"bc":17000}}}',
+      ]);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.tap(find.text('New opponent'));
+      await tester.pump();
+
+      // The search screen comes back: the finished game's pieces are lifted off its board.
+      expect(find.text('Finding opponent'), findsOneWidget);
+      expect(find.byType(MatchIntroClearPieces), findsOneWidget);
+      expect(getBoardPieces(tester), isEmpty);
+
+      await tester.pump(const Duration(seconds: 2));
+      sendServerSocketMessages(Uri(path: '/lobby/socket/v5'), [
+        '{"t": "redirect", "d": {"id": "zzOppo2nGame" }}',
+      ]);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('Opponent found'), findsOneWidget);
+
+      await tester.pump(kFakeWebSocketConnectionLag);
+      sendServerSocketMessages(GameController.socketUri(const GameFullId('zzOppo2nGame')), [
+        makeFullEvent(const GameId('zzOppo2n'), '', whiteUserName: 'Peter', blackUserName: 'Ada'),
+      ]);
+      await tester.pump();
+      await tester.pump();
+
+      // The new game plays the intro like the first one: card over an empty board, then the pieces.
+      expect(find.text('Opponent found'), findsOneWidget);
+      expect(getBoardPieces(tester), isEmpty);
+      await tester.pump(const MatchIntroTimeline().duration);
+      expect(getBoardPieces(tester).length, 32);
+      expect(find.text('Ada'), findsOneWidget);
+    }, variant: kPlatformVariant);
+
+    testWidgets('a rematch keeps the finished game until it loads, then clears it', (
+      WidgetTester tester,
+    ) async {
+      await createTestGame(tester, pgn: 'e4 e5 Nf3 Nc6');
+      sendServerSocketMessages(testGameSocketUri, [
+        '{"t":"endData","d":{"status":"resign","winner":"white","clock":{"wc":17800,"bc":17000}}}',
+      ]);
+      await tester.pump(const Duration(seconds: 2));
+      final finishedPieces = getBoardPieces(tester);
+      expect(finishedPieces, isNotEmpty);
+
+      // The rematch is accepted: the server redirects to the new game.
+      sendServerSocketMessages(testGameSocketUri, [
+        '{"t":"redirect","d":{"id":"zzRematchGam","url":"/zzRematchGam"}}',
+      ]);
+      await tester.pump();
+      await tester.pump();
+
+      // The finished game stays on screen while the new one loads: no loading skeleton.
+      expect(getBoardPieces(tester), finishedPieces);
+      expect(find.byType(LoadingPlayerWidget), findsNothing);
+
+      await tester.pump(kFakeWebSocketConnectionLag);
+      sendServerSocketMessages(GameController.socketUri(const GameFullId('zzRematchGam')), [
+        makeFullEvent(
+          const GameId('zzRematc'),
+          '',
+          whiteUserName: 'Steven',
+          blackUserName: 'Peter',
+          youAre: Side.black,
+        ),
+      ]);
+      await tester.pump();
+      await tester.pump();
+
+      // The new board starts empty under the intro, which clears the previous game's pieces (there
+      // is no search card), then the new pieces land, from black's side.
+      expect(find.byType(MatchIntroPieces), findsOneWidget);
+      expect(find.byType(MatchIntroCard), findsNothing);
+      expect(getBoardPieces(tester), isEmpty);
+      await tester.pump(const MatchIntroTimeline(clearsBoard: true).duration);
+      expect(getBoardPieces(tester).length, 32);
+      expect(boardHasPiece(tester, Square.e8, Piece.blackKing), isTrue);
+    }, variant: kPlatformVariant);
+
+    testWidgets('no match intro when animations are disabled', (WidgetTester tester) async {
+      await matchLobbySeek(tester, disableAnimations: true);
+
+      expect(getBoardPieces(tester).length, 32);
+      expect(find.text('Peter'), findsOneWidget);
+      expect(find.text('Opponent found'), findsNothing);
     }, variant: kPlatformVariant);
 
     for (final authUser in [
@@ -507,7 +683,8 @@ void main() {
         },
       );
       await tester.pumpWidget(app);
-      await tester.pumpAndSettle();
+      // Not pumpAndSettle: the search card's spinner never settles.
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('3+2 • Rated'), findsOneWidget);
     }, variant: kPlatformVariant);
@@ -556,7 +733,8 @@ void main() {
         },
       );
       await tester.pumpWidget(app);
-      await tester.pumpAndSettle();
+      // Not pumpAndSettle: the search card's spinner never settles.
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('3+2 • Rated'), findsOneWidget);
     }, variant: kPlatformVariant);

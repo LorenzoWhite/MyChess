@@ -4,9 +4,13 @@ import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/model/analysis/analysis_controller.dart';
 import 'package:lichess_mobile/src/model/analysis/analysis_preferences.dart';
+import 'package:lichess_mobile/src/model/analysis/common_analysis_state.dart';
+import 'package:lichess_mobile/src/model/analysis/game_report_controller.dart';
+import 'package:lichess_mobile/src/model/analysis/move_quality.dart';
 import 'package:lichess_mobile/src/model/engine/position_evaluator.dart';
 import 'package:lichess_mobile/src/model/settings/board_preferences.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_board.dart';
+import 'package:lichess_mobile/src/widgets/pgn.dart' show makeAnnotation;
 
 class const GameAnalysisBoard({
   required final AnalysisOptions options,
@@ -54,6 +58,17 @@ class _GameAnalysisBoardState()
   void onUserMove(Move move) => ref
       .read(analysisControllerProvider(widget.options).notifier)
       .onUserMove(move, shouldReplace: widget.shouldReplaceChildOnUserMove);
+
+  @override
+  Annotation? annotationFor(AnalysisCurrentNodeInterface node) {
+    // A game report's judgement, when one has been run for this game.
+    final report = ref.watch(gameReportProvider(widget.options.contextId)).report;
+    final quality = report?.atPly(analysisState.currentPosition.ply)?.quality;
+    final nag = quality == null ? null : nagForQuality(quality);
+    if (nag != null) return makeAnnotation([nag]);
+
+    return super.annotationFor(node);
+  }
 
   @override
   ISet<Shape> get extraShapes {
